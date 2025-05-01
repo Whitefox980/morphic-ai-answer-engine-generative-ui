@@ -4,7 +4,7 @@ import axios from 'axios';
 import redis from '@/lib/redis';
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
-  const { query } = req.body;
+  const { query, user = 'anon' } = req.body;
   if (!query) return res.status(400).json({ error: 'No query provided' });
 
   const q = query.toLowerCase();
@@ -15,7 +15,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
   const cacheKey = `gdekako:${q}`;
   const cached = await redis.get(cacheKey);
-  if (cached) return res.status(200).json({ agent, odgovor: cached });
+  if (cached) {
+    await redis.rpush(`gdekako:${user}:history`, `Q: ${query}
+A: ${cached}`);
+    await redis.ltrim(`gdekako:${user}:history`, -10, -1);
+    return res.status(200).json({ agent, odgovor: cached });
+  }
 
   const tavilyRes = await axios.post('https://api.tavily.com/search', {
     api_key: process.env.TAVILY_KEY,
@@ -40,8 +45,11 @@ Formuliši jasan odgovor na srpskom.`;
       'Content-Type': 'application/json'
     }
   });
-  const final = openaiRes.data.choices[0].message.content;
 
-  await redis.set(cacheKey, final, 'EX', 86400); // čuvaj 24h
+  const final = openaiRes.data.choices[0].message.content;
+  await redis.set(cacheKey, final, 'EX', 86400);
+  await redis.rpush(`gdekako:${user}:history`, `Q: ${query}
+A: ${final}`);
+  await redis.ltrim(`gdekako:${user}:history`, -10, -1);
   return res.status(200).json({ agent, odgovor: final });
 }
