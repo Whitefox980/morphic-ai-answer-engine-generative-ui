@@ -1,6 +1,7 @@
 
 import type { NextApiRequest, NextApiResponse } from 'next';
 import axios from 'axios';
+import redis from '@/lib/redis';
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   const { query } = req.body;
@@ -12,13 +13,16 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   else if (q.includes('lokacija') || q.includes('gde')) agent = 'Marko – lokacijski agent';
   else if (q.includes('turizam') || q.includes('putovanje')) agent = 'Turistički agent';
 
+  const cacheKey = `gdekako:${q}`;
+  const cached = await redis.get(cacheKey);
+  if (cached) return res.status(200).json({ agent, odgovor: cached });
+
   const tavilyRes = await axios.post('https://api.tavily.com/search', {
     api_key: process.env.TAVILY_KEY,
     query,
     search_depth: 'advanced',
     include_answers: true
   });
-
   const docs = tavilyRes.data.answers.map((a: any) => `- ${a.answer}`).join('
 ');
   const prompt = `Korisnik pita: ${query}
@@ -36,7 +40,8 @@ Formuliši jasan odgovor na srpskom.`;
       'Content-Type': 'application/json'
     }
   });
-
   const final = openaiRes.data.choices[0].message.content;
+
+  await redis.set(cacheKey, final, 'EX', 86400); // čuvaj 24h
   return res.status(200).json({ agent, odgovor: final });
 }
