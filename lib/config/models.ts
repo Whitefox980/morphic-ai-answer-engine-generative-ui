@@ -1,5 +1,4 @@
 import { Model } from '@/lib/types/models'
-import { headers } from 'next/headers'
 import defaultModels from './default-models.json'
 
 export function validateModel(model: any): model is Model {
